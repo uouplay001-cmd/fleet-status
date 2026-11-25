@@ -561,9 +561,38 @@ function emptyState(){
 }
 
 /* ===== ค้นหา ===== */
+/* คำค้น → กลุ่มเงื่อนไข: ทุกคำในกลุ่มต้องตรง (AND) และกลุ่มใดกลุ่มหนึ่งตรงก็พอ (OR)
+ * - คั่นด้วยจุลภาค ; หรือขึ้นบรรทัดใหม่ = หลายกลุ่ม เช่น "สิบล้อ ban rong, 60-3922"
+ * - ถ้าทุกคำเป็นรหัสตัวเลข (ทะเบียน/รหัสสินทรัพย์/Cost Center) ≥ 4 หลัก และมีมากกว่า 1 คำ
+ *   ให้ถือว่าค้นหลายคัน เช่น วางทะเบียนทั้งคอลัมน์จาก Excel */
+const normQ = s => s.toLowerCase().replace(/-/g, '');
+function parseQuery(q){
+  const raw = q.trim().toLowerCase();
+  if (!raw) return {groups: [], multi: false, codes: []};
+  let parts = raw.split(/[,;\n\r]+/).map(p => p.trim()).filter(Boolean);
+  if (parts.length === 1){
+    const toks = parts[0].split(/\s+/);
+    if (toks.length > 1 && toks.every(t => /^[\d-]{4,}$/.test(t))) parts = toks;
+  }
+  const groups = parts.map(p => p.split(/\s+/).map(normQ).filter(Boolean)).filter(g => g.length);
+  const multi = groups.length > 1;
+  return {groups, multi, codes: multi ? parts : []};
+}
+function rowHay(r){
+  if (r._hay == null) r._hay = normQ([r.plate, r.plateF, r.desc, r.assetS4, r.assetECC, r.wbs, r.costCenter, r.loc, r.locRaw, r.vtype, r.contract, r.lessorName, r.agreementNo, r.note, r.usage, r.sale]
+    .map(x => String(x ?? '')).join(' '));
+  return r._hay;
+}
+const groupHit = (r, g) => g.every(t => rowHay(r).includes(t));
+/** ค้นหลายคัน: คำไหนไม่เจอรถเลย (ไม่สนตัวกรองอื่น) */
+function multiQueryInfo(){
+  const pq = parseQuery(S.q);
+  if (!pq.multi) return null;
+  const missing = pq.codes.filter((c, i) => !S.rows.some(r => groupHit(r, pq.groups[i])));
+  return {total: pq.groups.length, found: pq.groups.length - missing.length, missing};
+}
 function filtered(){
-  const q = S.q.trim().toLowerCase().replace(/-/g, '');
-  const terms = q ? q.split(/\s+/) : [];
+  const {groups} = parseQuery(S.q);
   return S.rows.filter(r => {
     if (S.fTier !== 'all' && r.tier !== S.fTier) return false;
     if (S.fLoc && r.loc !== S.fLoc) return false;
@@ -575,11 +604,7 @@ function filtered(){
     if (S.card === 'run' && r.tier !== 'run') return false;
     if (S.card === 'fav' && !S.favs.has(recKey(r))) return false;
     if (S.fField && String(fieldVal(r, S.fField.f)) !== String(S.fField.v)) return false;
-    if (terms.length){
-      const hay = [r.plate, r.plateF, r.desc, r.assetS4, r.assetECC, r.wbs, r.costCenter, r.loc, r.locRaw, r.vtype, r.contract, r.lessorName, r.agreementNo, r.note, r.usage, r.sale]
-        .map(x => String(x ?? '')).join(' ').toLowerCase().replace(/-/g, '');
-      if (!terms.every(t => hay.includes(t))) return false;
-    }
+    if (groups.length && !groups.some(g => groupHit(r, g))) return false;
     return true;
   });
 }
@@ -594,7 +619,7 @@ function viewSearch(){
   const card = (id, num, h, p) => `<button class="card ${S.card === id ? 'on' : ''}" data-card="${id}"><div class="num">${num}</div><h3>${h}</h3><p>${p}</p></button>`;
   return `
   <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input type="search" id="q" placeholder="พิมพ์ทะเบียนรถ, รหัสสินทรัพย์, WBS, Cost Center, Location หรือสัญญางาน" value="${esc(S.q)}" autocomplete="off"></div>
+    <input type="search" id="q" placeholder="ทะเบียน, รหัสสินทรัพย์, WBS, Cost Center, Location · ค้นหลายคันคั่นด้วยเว้นวรรคหรือจุลภาค" value="${esc(S.q)}" autocomplete="off"></div>
   <div class="filters">
     <select id="fLoc" aria-label="Location">${opts(uniq(r => r.loc), S.fLoc, 'ทุก Location')}</select>
     <select id="fType" aria-label="ประเภทรถ">${opts(uniq(r => r.vtype), S.fType, 'ทุกประเภทรถ')}</select>
@@ -631,8 +656,10 @@ function renderResults(){
   const el = $('#results'); if (!el) return;
   const shown = rows.slice(0, S.shown);
   if (S.selIdx >= shown.length) S.selIdx = shown.length - 1;
+  const mq = multiQueryInfo();
   el.innerHTML = `<h2 class="sec">${S.card === 'fav' ? 'รายการโปรด' : 'ผลลัพธ์'} <span class="muted small">${fmtN(rows.length)} คัน</span><span class="spacer"></span>
     ${S.fField ? `<span class="pill p-info">${esc(S.fField.label)}</span>` : ''}${(S.q || S.fLoc || S.fType || S.fTax || S.fTier !== 'all' || S.fLeased || S.card || S.fField) ? '<button class="btn sm" data-act="clear">ล้างตัวกรอง</button>' : ''}${exportBtn('searchList')}</h2>
+  ${mq ? `<div class="note ${mq.missing.length ? '' : 'info'}" style="margin-top:0">ค้นหลายคัน: พบ <b>${mq.found}</b> จาก ${mq.total} รายการ${mq.missing.length ? ` · <b>ไม่พบ:</b> ${mq.missing.map(m => `<code>${esc(m)}</code>`).join(', ')}` : ' ครบทุกรายการ'}</div>` : ''}
   ${rows.length ? `<div class="tblwrap"><table><thead><tr><th style="width:30px"></th>${SEARCH_COLS.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
   ${shown.map((r, i) => `<tr class="click ${i === S.selIdx ? 'sel' : ''}" data-open="${esc(recKey(r))}" data-i="${i}">
     <td><button class="star ${S.favs.has(recKey(r)) ? 'on' : ''}" data-fav="${esc(recKey(r))}" title="รายการโปรด">${S.favs.has(recKey(r)) ? '★' : '☆'}</button></td>
