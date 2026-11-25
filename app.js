@@ -94,6 +94,7 @@ function toISO(v){
   if (y > 2400) iso = (y - 543) + iso.slice(4);   // พ.ศ. → ค.ศ.
   return iso;
 }
+const fmtDT = ms => { const d = new Date(ms); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const fmtD = iso => iso ? `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(0,4)}` : '–';
 const monYear = iso => iso ? `${TH_MON[+iso.slice(5,7)-1]} ${iso.slice(0,4)}` : '–';
 const daysBetween = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 864e5);
@@ -679,8 +680,8 @@ function viewRun(){
     ${kpi('acc', 'ฐานรถคงเหลือ', fmtN(c.base), prev ? 'เทียบเดือนก่อน ' + deltaTxt(c.base, prev.base) : '')}
     ${kpi('run', 'วิ่งงาน', fmtN(c.run), prev ? deltaTxt(c.run, prev.run) : '')}
     ${kpi('idle', 'พร้อมใช้งาน ไม่มีงานวิ่ง', fmtN(c.idle), prev ? deltaTxt(c.idle, prev.idle, true) : '')}
+    ${kpi('info', 'อัตราใช้ประโยชน์', fmtP(c.run, c.run + c.idle), `<span title="วิ่งงาน ÷ (วิ่งงาน + พร้อมใช้งานไม่มีงานวิ่ง)">${fmtN(c.run)} ÷ ${fmtN(c.run + c.idle)} คัน (ฐานคำนวณ)</span>` + (prev && prev.util != null ? '<br>เดือนก่อน ' + (prev.util * 100).toFixed(1) + '%' : ''))}
     ${kpi('down', 'ไม่พร้อมใช้งาน', fmtN(c.down), prev ? deltaTxt(c.down, prev.down, true) : '')}
-    ${kpi('info', 'อัตราใช้ประโยชน์', fmtP(c.run, c.run + c.idle), prev && prev.util != null ? 'เดือนก่อน ' + (prev.util * 100).toFixed(1) + '%' : '')}
     ${kpi('sold', 'ขายแล้วสะสม (นอกฐาน)', fmtN(c.sold), soldNow ? 'ขายในงวดนี้ ' + soldNow + ' คัน' : 'ไม่มีขายในงวดนี้')}
   </div>
   <div class="muted small" style="margin-top:8px">ติดภาระ Leasing ${fmtN(leased)} คัน (${fmtP(leased, c.base)} ของฐาน) · อัตราใช้ประโยชน์ = วิ่งงาน ÷ (วิ่งงาน + พร้อมใช้งานไม่มีงานวิ่ง)</div>
@@ -844,9 +845,9 @@ function viewIO(){
   </div>
 
   <h2 class="sec">งวดในระบบ <span class="muted small">${list.length} งวด</span></h2>
-  ${list.length ? `<div class="tblwrap"><table><thead><tr><th>บริษัท</th><th>งวด</th><th class="n">จำนวนรถ</th><th class="n">วิ่งงาน</th><th class="n">อัตราใช้ประโยชน์</th><th>ไฟล์ต้นทาง</th><th>นำเข้าเมื่อ</th><th>วันที่อ้างอิง</th><th></th></tr></thead><tbody>
+  ${list.length ? `<div class="tblwrap"><table><thead><tr><th>บริษัท</th><th>งวด</th><th class="n">จำนวนรถ</th><th class="n">วิ่งงาน</th><th class="n">อัตราใช้ประโยชน์</th><th>ไฟล์ต้นทาง</th><th>Last Updated</th><th>วันที่อ้างอิง</th><th></th></tr></thead><tbody>
   ${list.map(x => { const c = x.rows ? count(computePeriod(x)) : (x.stats || {run: 0, idle: 0}); const n = x.rows ? x.rows.length : (x.rowCount || 0); return `<tr class="${p && x.key === p.key ? 'sel' : ''}"><td>${esc(x.company)}</td><td><b>${x.label}</b></td><td class="n">${fmtN(n)}</td><td class="n">${fmtN(c.run)}</td><td class="n">${fmtP(c.run, c.run + c.idle)}</td>
-    <td class="small">${esc(x.fileName)}<div class="faint">ชีต ${esc(x.sheet)}</div></td><td class="small">${new Date(x.importedAt).toLocaleString('th-TH-u-ca-gregory')}</td>
+    <td class="small">${esc(x.fileName)}<div class="faint">ชีต ${esc(x.sheet)}</div></td><td class="small">${fmtDT(x.importedAt)}</td>
     <td>${W ? `<input type="date" value="${refDateOf(x)}" data-ref="${esc(x.key)}" aria-label="วันที่อ้างอิง ${x.label}" style="padding:4px 6px">` : fmtD(refDateOf(x))}</td>
     <td><button class="btn sm" data-goto="${esc(x.key)}">เปิด</button>${W ? ` <button class="btn sm danger" data-del="${esc(x.key)}">ลบ</button>` : ''}</td></tr>`; }).join('')}
   </tbody></table></div>` : `<div class="note">${W ? 'ยังไม่มีงวดในระบบ นำเข้าไฟล์ Excel ด้านบนเพื่อเริ่มต้น' : 'ผู้ดูแลยังไม่ได้นำเข้าข้อมูล'}</div>`}
@@ -1044,7 +1045,7 @@ async function load(selectKey){
   const cos = [...new Set(S.periods.map(p => p.company))];
   $('#selCompany').innerHTML = cos.length ? cos.map(c => `<option ${S.cur && S.cur.company === c ? 'selected' : ''}>${esc(c)}</option>`).join('') : '<option>–</option>';
   $('#selPeriod').innerHTML = S.cur ? S.periods.filter(p => p.company === S.cur.company).slice().reverse().map(p => `<option value="${esc(p.key)}" ${p.key === S.cur.key ? 'selected' : ''}>${p.label}</option>`).join('') : '<option>ยังไม่มีงวด</option>';
-  $('#subline').innerHTML = S.cur ? `ข้อมูลจาก ${esc(S.cur.fileName)} · นำเข้าเมื่อ ${new Date(S.cur.importedAt).toLocaleString('th-TH-u-ca-gregory', {dateStyle: 'short', timeStyle: 'short'})} · ${fmtN(S.rows.length)} คัน · วันที่อ้างอิง ${fmtD(refDateOf(S.cur))}` : (Store.ready ? 'ยังไม่มีข้อมูล' : 'กำลังโหลดข้อมูล…');
+  $('#subline').innerHTML = S.cur ? `ข้อมูลจาก ${esc(S.cur.fileName)} · Last Updated ${fmtDT(S.cur.importedAt)} · ${fmtN(S.rows.length)} คัน · วันที่อ้างอิง ${fmtD(refDateOf(S.cur))}` : (Store.ready ? 'ยังไม่มีข้อมูล' : 'กำลังโหลดข้อมูล…');
   $('#role').innerHTML = Store.mode === 'sb' && Store.needPw ? '' : Store.mode === 'local' ? '<span class="pill p-sold">เก็บในเครื่องนี้</span>' : Store.canWrite ? '<span class="pill p-run">ผู้ดูแล · บันทึกได้</span>' : '<span class="pill p-info">ดูและส่งออกได้</span>';
   render();
 }
