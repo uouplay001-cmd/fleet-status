@@ -44,6 +44,7 @@ const FIELDS = [
   ['leaseType', /Supplementary/i],
   ['vtype', /^ประเภทรถ$/],
   ['wbs', /^WBS/i],
+  ['costCenter', /^Cost\s*Center$/i],
   ['note', /^หมายเหตุ$/],
   ['usage', /^การใช้งาน$/],
   ['sale', /^ขาย\s*\/\s*ไม่ขาย$/],
@@ -56,7 +57,7 @@ const FIELD_LABEL = {
   desc:'รายการ', plate:'ทะเบียนรถ', locRaw:'Location', sapStatus:'สถานะ', lessorCode:'Leasing company',
   lessorName:'Leasing company name', agreementNo:'Agreement number', agreementDate:'Agreement date',
   leaseStart:'Lease start date', noticeDate:'Notice date', leaseType:'Supplementary text', vtype:'ประเภทรถ',
-  wbs:'WBS', note:'หมายเหตุ', usage:'การใช้งาน', sale:'ขาย/ไม่ขาย', contract:'สัญญางาน', insurance:'ประกันภัย', taxRaw:'สถานะภาษี',
+  wbs:'WBS', costCenter:'Cost Center', note:'หมายเหตุ', usage:'การใช้งาน', sale:'ขาย/ไม่ขาย', contract:'สัญญางาน', insurance:'ประกันภัย', taxRaw:'สถานะภาษี',
 };
 const DATE_FIELDS = new Set(['buyDate','agreementDate','leaseStart','noticeDate']);
 const MONTH_HDR = /วิ่งงาน[^\d]*(\d{1,2})[.\/-](\d{4})/;
@@ -280,7 +281,9 @@ function diffPeriods(prev, cur){
  *   เจ้าของ artifact เท่านั้นที่บันทึก/ลบได้ ผู้ใช้อื่นอ่านและส่งออกอย่างเดียว
  * ออฟไลน์ (เปิดไฟล์ในเครื่อง): IndexedDB ของเบราว์เซอร์ ผู้ใช้เครื่องนั้นบันทึกได้
  */
-const ROW_COLS = [...FIELDS.map(f => f[0]), 'months'];
+// ลำดับคอลัมน์ที่บันทึกในฐานข้อมูล: ห้ามแทรกกลาง ฟิลด์ใหม่ต่อท้ายเท่านั้น งวดเก่าจะได้ค่า null
+const ADDED_COLS = ['costCenter'];
+const ROW_COLS = [...FIELDS.map(f => f[0]).filter(f => !ADDED_COLS.includes(f)), 'months', ...ADDED_COLS];
 const CHUNK = 150;
 const encodeRow = r => ROW_COLS.map(f => r[f] ?? null);
 const decodeRow = a => Object.fromEntries(ROW_COLS.map((f, i) => [f, a[i] ?? null]));
@@ -572,7 +575,7 @@ function filtered(){
     if (S.card === 'fav' && !S.favs.has(recKey(r))) return false;
     if (S.fField && String(fieldVal(r, S.fField.f)) !== String(S.fField.v)) return false;
     if (terms.length){
-      const hay = [r.plate, r.plateF, r.desc, r.assetS4, r.assetECC, r.wbs, r.loc, r.locRaw, r.vtype, r.contract, r.lessorName, r.agreementNo, r.note, r.usage, r.sale]
+      const hay = [r.plate, r.plateF, r.desc, r.assetS4, r.assetECC, r.wbs, r.costCenter, r.loc, r.locRaw, r.vtype, r.contract, r.lessorName, r.agreementNo, r.note, r.usage, r.sale]
         .map(x => String(x ?? '')).join(' ').toLowerCase().replace(/-/g, '');
       if (!terms.every(t => hay.includes(t))) return false;
     }
@@ -590,7 +593,7 @@ function viewSearch(){
   const card = (id, num, h, p) => `<button class="card ${S.card === id ? 'on' : ''}" data-card="${id}"><div class="num">${num}</div><h3>${h}</h3><p>${p}</p></button>`;
   return `
   <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input type="search" id="q" placeholder="พิมพ์ทะเบียนรถ, รหัสสินทรัพย์, WBS, Location หรือสัญญางาน" value="${esc(S.q)}" autocomplete="off"></div>
+    <input type="search" id="q" placeholder="พิมพ์ทะเบียนรถ, รหัสสินทรัพย์, WBS, Cost Center, Location หรือสัญญางาน" value="${esc(S.q)}" autocomplete="off"></div>
   <div class="filters">
     <select id="fLoc" aria-label="Location">${opts(uniq(r => r.loc), S.fLoc, 'ทุก Location')}</select>
     <select id="fType" aria-label="ประเภทรถ">${opts(uniq(r => r.vtype), S.fType, 'ทุกประเภทรถ')}</select>
@@ -861,10 +864,10 @@ function viewIO(){
 
 /* ---------- export ---------- */
 function exportRowsFull(rows){
-  const head = ['ทะเบียนรถ', 'รหัสสินทรัพย์ (SAP)', 'รหัสสินทรัพย์ (Mac5)', 'รายการ', 'ประเภทรถ', 'Location', 'Location (ในไฟล์ต้นทาง)', 'WBS', 'การใช้งาน', 'ขาย/ไม่ขาย',
+  const head = ['ทะเบียนรถ', 'รหัสสินทรัพย์ (SAP)', 'รหัสสินทรัพย์ (Mac5)', 'รายการ', 'ประเภทรถ', 'Location', 'Location (ในไฟล์ต้นทาง)', 'WBS', 'Cost Center', 'การใช้งาน', 'ขาย/ไม่ขาย',
     'สถานะงวดรายงาน', 'ชั้นการใช้งาน', 'เดือนวิ่งงานสะสม', 'เดือนที่ขาย', 'สถานะภาษี', 'กลุ่มภาษี', 'วันครบกำหนดภาษี', 'วันคงเหลือถึงครบกำหนด', 'ประกันภัย',
     'ภาระผูกพัน', 'ประเภทภาระ', 'ผู้ให้สินเชื่อ', 'เลขที่สัญญา', 'วันเริ่มสัญญา', 'Notice date', 'ครบกำหนดภาระ', 'สัญญางาน', 'หมายเหตุ'];
-  return [head, ...rows.map(r => [r.plateF, r.assetS4, r.assetECC, r.desc, r.vtype, r.loc, r.locRaw, r.wbs, r.usage, r.sale,
+  return [head, ...rows.map(r => [r.plateF, r.assetS4, r.assetECC, r.desc, r.vtype, r.loc, r.locRaw, r.wbs, r.costCenter ?? '', r.usage, r.sale,
     r.cur || '', TIER[r.tier].label, r.runMonths, r.soldMonth ? TH_MON[r.soldMonth - 1] : '-', r.taxGroup === 'ภาษีปกติ' ? 'ครบกำหนด ' + monYear(r.taxDate) : r.taxGroup,
     r.taxGroup, fmtD(r.taxDate), r.taxDays ?? '', r.insurance, r.leased ? 'ติดภาระ' : 'ปลอดภาระ', r.leaseKind, r.lessorName || '-', r.agreementNo || '',
     fmtD(r.leaseStart), fmtD(r.noticeDate), r.leaseDue, r.contract, r.note])];
@@ -996,7 +999,7 @@ function openDrawer(key){
     <div class="muted small" style="margin-top:4px">วิ่งงานสะสม ${r.runMonths} จาก ${p.month} เดือน · ● วิ่งงาน ○ ไม่วิ่งงาน ✕ ขายแล้ว</div>
     <h3>ข้อมูลรถ</h3>
     ${kv([['ประเภทรถ', esc(r.vtype)], ['Location', esc(r.loc) + (r.loc !== r.locRaw ? ` <span class="faint small">(${esc(r.locRaw)})</span>` : '')], ['การใช้งาน', esc(r.usage)], ['ขาย/ไม่ขาย', esc(r.sale)],
-      ['สัญญางาน', esc(r.contract)], ['WBS', `<code>${esc(r.wbs)}</code>`], ['รหัสสินทรัพย์ (SAP)', esc(r.assetS4)], ['รหัสสินทรัพย์ (Mac5)', esc(r.assetECC)], ['วันที่ซื้อ', fmtD(r.buyDate)], ['สถานะ SAP', esc(r.sapStatus)]])}
+      ['สัญญางาน', esc(r.contract)], ['WBS', `<code>${esc(r.wbs)}</code>`], ['Cost Center', r.costCenter ? `<code>${esc(r.costCenter)}</code>` : '–'], ['รหัสสินทรัพย์ (SAP)', esc(r.assetS4)], ['รหัสสินทรัพย์ (Mac5)', esc(r.assetECC)], ['วันที่ซื้อ', fmtD(r.buyDate)], ['สถานะ SAP', esc(r.sapStatus)]])}
     <h3>ภาษีและประกันภัย</h3>
     ${kv([['สถานะภาษี', esc(r.taxGroup)], ['วันครบกำหนด', fmtD(r.taxDate) + (r.taxDays != null ? ` <span class="muted small">(${r.taxDays < 0 ? 'เลยวันอ้างอิง ' + -r.taxDays + ' วัน · รออัปเดต' : 'อีก ' + r.taxDays + ' วัน'})</span>` : '')], ['ประกันภัย', esc(r.insurance)]])}
     <h3>Leasing / ภาระผูกพัน</h3>
